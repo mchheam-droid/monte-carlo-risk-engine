@@ -5,6 +5,7 @@
 #include <thread>
 #include <cmath>
 #include <algorithm>
+#include <stdexcept>
 
 namespace risk {
 
@@ -26,6 +27,18 @@ std::vector<double> SimulationEngine::simulate_portfolio_values(
     bool use_antithetic
 ) {
     const int n_assets = static_cast<int>(assets.size());
+        if (n_assets <= 0) {
+        throw std::invalid_argument("assets must not be empty");
+    }
+    if (num_paths <= 0) {
+        throw std::invalid_argument("num_paths must be positive");
+    }
+    if (horizon_days <= 0.0) {
+        throw std::invalid_argument("horizon_days must be positive");
+    }
+    if (correlation_matrix.size() != static_cast<size_t>(n_assets) * n_assets) {
+        throw std::invalid_argument("correlation_matrix must be n_assets x n_assets");
+    }
     const double dt = horizon_days / 252.0; // 252 business days per calendar year
     const double sqrt_dt = std::sqrt(dt);
 

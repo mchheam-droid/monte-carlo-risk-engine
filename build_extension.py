@@ -4,9 +4,10 @@ import subprocess
 import sysconfig
 import pybind11
 
+
 def build():
     print("=" * 60)
-    print(" Compiling High-Performance C++ Monte Carlo Engine...")
+    print(" Compiling Monte Carlo Engine...")
     print("=" * 60)
 
     
