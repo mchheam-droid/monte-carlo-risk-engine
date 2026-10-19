@@ -1,0 +1,17 @@
+# Python environment & cache
+.venv/
+__pycache__/
+*.pyc
+
+# C++ Build artifacts (binaries)
+*.pyd
+*.dll
+*.so
+*.o
+*.obj
+
+# Personal school files
+I2/
+
+# IDE files
+.vscode/
