@@ -1,102 +1,105 @@
-# High-Performance Monte Carlo Portfolio Risk Engine
+# Monte Carlo Portfolio Risk Engine
 
-A hybrid C++ / Python quantitative risk analytics engine modeling correlated asset price paths via multi-threaded Monte Carlo simulation and computing regulatory market risk metrics (Value at Risk & Conditional VaR).
+A Monte Carlo engine for portfolio market risk (VaR and Expected Shortfall). The simulation core is written in C++ and runs on several threads. It is exposed to Python through Pybind11, and Python handles the portfolio definition and the risk report.
 
----
+I built it to learn how market risk is measured in practice, and to see how much a C++ core helps compared to a Python loop. Next step is derivatives pricing (see Roadmap).
 
-## Overview
+## What it does
 
-In quantitative portfolio management, estimating tail risk across correlated assets requires simulating large volumes of future market scenarios. While Python is standard for data analysis, pure Python loops suffer from interpreter overhead and the Global Interpreter Lock (GIL).
+- Simulates correlated multi-asset prices over a short horizon (1 day in the demo) under geometric Brownian motion.
+- Correlates the shocks with a Cholesky factorization of the correlation matrix.
+- Optionally uses antithetic variates (each draw `Z` is paired with `-Z`).
+- Splits the paths across `std::thread` workers, each with its own random number generator. The GIL is released during the computation.
+- Computes VaR and Expected Shortfall (ES) from the simulated loss distribution.
 
-This project implements a high-performance architecture:
-- **C++ Core Engine**: High-throughput multi-threaded simulation using modern C++ (`std::thread`), linear algebra, and thread-safe random number generation.
-- **Pybind11 Integration**: Seamless zero-overhead Python binding with explicit GIL release during intensive compute phases.
-- **Python Risk Suite**: Clean financial abstraction for multi-asset portfolios, validation checks, and tail risk reporting.
+## Model
 
----
+For asset *i*, the price after a step of length Δt is
 
-## Mathematical Formulation
+$$S_i(t+\Delta t) = S_i(t)\,\exp\!\Big(\big(\mu_i - \tfrac{1}{2}\sigma_i^2\big)\Delta t + \sigma_i\sqrt{\Delta t}\,Z_i\Big)$$
 
-### 1. Correlated Geometric Brownian Motion (GBM)
-The price path of each asset $i$ under standard Black-Scholes dynamics follows:
+with Δt = horizon / 252 (horizon in business days), μ the annualized drift and σ the annualized volatility.
 
-$$S_i(t + \Delta t) = S_i(t) \exp\left( \left(\mu_i - \frac{1}{2}\sigma_i^2\right)\Delta t + \sigma_i \sqrt{\Delta t} \, Z_{i, \text{corr}} \right)$$
+The shocks are correlated through the Cholesky factor L of the correlation matrix Σ:
 
-where:
-- $S_i(t)$ is the spot price of asset $i$
-- $\mu_i$ is the annualized expected drift
-- $\sigma_i$ is the annualized volatility
-- $\Delta t = \frac{\text{horizon}}{252}$ is the trading time step (252 business days per year)
+$$\Sigma = L L^{\top}, \qquad Z = L\,\varepsilon, \quad \varepsilon \sim \mathcal{N}(0, I)$$
 
-### 2. Cholesky Correlation Factorization
-To generate correlated shocks from independent standard normal variates $Z \sim \mathcal{N}(0, \mathbf{I})$, we decompose the empirical correlation matrix $\mathbf{\Sigma}$:
+A jitter of 1e-10 is added to the diagonal so the factorization does not fail on nearly singular empirical matrices.
 
-$$\mathbf{\Sigma} = \mathbf{L} \mathbf{L}^T$$
+## Risk measures
 
-where $\mathbf{L}$ is a lower-triangular matrix. The correlated shocks are obtained via:
+With V₀ the initial portfolio value and V the simulated terminal value, the loss is L = V₀ − V.
 
-$$Z_{\text{corr}} = \mathbf{L} \cdot Z \implies \text{Cov}(Z_{\text{corr}}) = \mathbf{L} \mathbf{I} \mathbf{L}^T = \mathbf{\Sigma}$$
+VaR at level α is the α-quantile of the loss: the loss that is exceeded with probability 1 − α.
 
-A small numerical jitter ($\varepsilon = 10^{-10}$) is applied to the diagonal to guarantee strict positive-definiteness on empirical matrices.
+$$\mathrm{VaR}_{\alpha} = \inf\{\ell : P(L \le \ell) \ge \alpha\}$$
 
-### 3. Variance Reduction: Antithetic Variates
-For every random shock $+Z$, the engine simultaneously generates its mirror counterpart $-Z$. Because $\mathbb{E}[Z + (-Z)] = 0$, this antithetic coupling substantially reduces Monte Carlo sampling variance without additional generator calls.
+Expected Shortfall is the average loss in the cases where the loss reaches or exceeds the VaR:
 
----
+$$\mathrm{ES}_{\alpha} = E\big[\,L \mid L \ge \mathrm{VaR}_{\alpha}\,\big]$$
 
-## Market Risk Metrics
+By construction ES ≥ VaR. ES is the measure used in the FRTB framework.
 
-From the terminal portfolio distribution, we compute the loss distribution $L = -(V_{\text{terminal}} - V_0)$:
+## Example output
 
-1. **Value at Risk ($\text{VaR}_\alpha$)**:
-   The maximum loss expected over the horizon at confidence level $\alpha$ (e.g., 95%, 99%, 99.9%):
-   $$\text{VaR}_\alpha = \text{Percentile}(L, \alpha)$$
+1,000,000 paths, 5 correlated stocks, 1-day horizon. The engine runs in 79.75 ms (about 12.5 million paths per second).
 
-2. **Conditional Value at Risk ($\text{CVaR}_\alpha$ / Expected Shortfall)**:
-   The average loss in the tail distribution beyond the VaR threshold (Basel III / FRTB standard):
-   $$\text{CVaR}_\alpha = \mathbb{E}[L \mid L \ge \text{VaR}_\alpha]$$
-
-Mathematically, $\text{CVaR}_\alpha \ge \text{VaR}_\alpha$ always holds.
-
----
-
-## Project Structure
-
-```text
-├── cpp/
-│   ├── include/
-│   │   ├── cholesky.hpp          # Cholesky factorization & vector correlation
-│   │   ├── rng.hpp               # Thread-safe 64-bit PRNG & antithetic pairs
-│   │   └── simulation_engine.hpp # Multi-threaded Monte Carlo engine header
-│   └── src/
-│       ├── cholesky.cpp          # 1D flattened Cholesky implementation
-│       ├── simulation_engine.cpp # Parallel worker threads & GBM loops
-│       └── bindings.cpp         # Pybind11 module with GIL release
-├── risk_engine/
-│   ├── __init__.py               # Package init & Windows DLL directory resolution
-│   ├── portfolio.py              # Portfolio dataclass with validation checks
-│   └── risk_engine.py            # Quantitative VaR & CVaR evaluator
-├── build_extension.py            # Automated compilation script (GCC / MinGW)
-├── main.py                       # End-to-end demo simulating 1,000,000 paths
-└── README.md
 ```
+ Portfolio Value      : $244.25
+ Expected PnL (Mean)  : $0.08
+ Worst-Case Loss      : $14.03
+ VaR 95.0%            : $5.01  (2.05%)
+ VaR 99.0%            : $7.07  (2.89%)
+ VaR 99.9%            : $9.39  (3.84%)
+ ES  95.0%            : $6.27  (2.57%)
+ ES  99.0%            : $8.10  (3.31%)
+ ES  99.9%            : $10.23 (4.19%)
 ```
 
----
+The VaR and ES ratios are close to the Gaussian ones (for example VaR 99% / VaR 95% ≈ 1.41), which is expected for a one-day GBM.
 
-## Quickstart
+## Limitations
 
-### Prerequisites
+- Constant volatility and Gaussian returns: no volatility smile, no fat tails. Extreme losses (99.9%) are probably underestimated compared to real markets.
+- Only the terminal value is simulated (one time step), which is exact for GBM but not enough for path-dependent products.
+- `weight` is a number of shares, not a percentage of the portfolio value.
+- The drift is a historical-style drift μ. For pricing, it would have to be replaced by the risk-free rate (risk-neutral measure).
+- The effect of antithetic variates on the VaR/ES estimates has not been measured yet.
+
+## Roadmap
+
+- [ ] Input validation in the C++ engine (number of paths, matrix size)
+- [ ] Check VaR against the parametric (variance-covariance) VaR
+- [ ] Benchmark against a vectorized NumPy baseline, with scaling by number of threads
+- [ ] Multi-step paths and European / barrier option pricing, validated against Black-Scholes
+- [ ] Reproducible results independent of the number of threads
+
+## Project structure
+
+```
+cpp/
+  include/
+    cholesky.hpp           Cholesky factorization and correlation of shocks
+    rng.hpp                per-thread random number generator, antithetic pairs
+    simulation_engine.hpp  engine interface
+  src/
+    cholesky.cpp
+    simulation_engine.cpp  worker threads and GBM loop
+    bindings.cpp           Pybind11 module (releases the GIL)
+risk_engine/
+  __init__.py
+  portfolio.py             portfolio definition and input checks
+  risk_engine.py           VaR / ES computation
+build_extension.py         build script (g++ / MinGW)
+main.py                    demo with 1,000,000 paths
+```
+
+## Usage
+
+Requirements: Python 3, `numpy`, `pybind11`, and `g++` (MinGW on Windows).
+
 ```bash
 pip install numpy pybind11
-```
-
-### 1. Build the C++ Extension
-```bash
 python build_extension.py
-```
-
-### 2. Run the Risk Pipeline
-```bash
 python main.py
 ```

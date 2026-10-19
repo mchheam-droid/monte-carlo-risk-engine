@@ -37,7 +37,7 @@ def run_risk_pipeline():
     initial_value = portfolio.total_value
     print(f"\n[Portfolio Initialized] Assets: {portfolio.num_assets} | Base Value: ${initial_value:.2f}")
     for i, sym in enumerate(tickers):
-        print(f"  - {sym:<6}: Spot=${spot_prices[i]:>6.2f} | Weight={weights[i]*100:>4.1f}% | Vol={volatilities[i]*100:>4.1f}%")
+        print(f"  - {sym:<6}: Spot=${spot_prices[i]:>6.2f} | Shares={weights[i]*100:>4.1f}% | Vol={volatilities[i]*100:>4.1f}%")
 
     # 2. Convert to C++ AssetData format
     cpp_assets = [
