@@ -5,8 +5,8 @@ from risk_engine._risk_engine import SimulationEngine, AssetData
 
 def run_risk_pipeline():
     print("=" * 70)
-    print(" HIGH-PERFORMANCE MONTE CARLO PORTFOLIO RISK ENGINE")
-    print(" Quantitative Finance & High-Performance Computing (C++ / Python)")
+    print(" MONTE CARLO PORTFOLIO RISK ENGINE")
+    print(" Quantitative Finance & Computing (C++ / Python)")
     print("=" * 70)
 
     # 1. Define multi-asset portfolio (5 US Tech Equities)
